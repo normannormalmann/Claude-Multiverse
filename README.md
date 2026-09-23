@@ -151,6 +151,15 @@ bounce failed. Run it explicitly:
   command and touches no editable file, but it still means "start Claude with this data
   directory" runs as administrator whenever the shortcut is clicked. `cmv unregister
   <name>` removes the task if you would rather confirm UAC on every launch.
+- **The data directory is writable without elevation.** The instance runs elevated but
+  reads its configuration from a folder any process under your account can modify.
+  `claude_desktop_config.json` lists MCP servers as commands that Claude starts as child
+  processes, so malware already running as you could plant an entry there and have it
+  started with administrator rights on the next launch. This is inherent to "elevated
+  app, user-writable data" and not specific to this tool. It does not give an attacker a
+  way in, but it turns an existing foothold into full administrator access. Treat your
+  Windows account with the same care you would give an administrator account, because
+  with these instances it effectively is one.
 - **Disk.** Each instance builds its own Cowork environment. Budget several GB — a fully
   set-up instance with Cowork can reach ~10 GB.
 - **Slow first launch** while the empty data directory is populated.

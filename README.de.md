@@ -158,6 +158,15 @@ automatische Wechsel ist fehlgeschlagen. Explizit ausführen:
   „Claude mit diesem Datenverzeichnis starten" bei jedem Klick als Administrator.
   `cmv unregister <name>` entfernt die Aufgabe, wenn du lieber bei jedem Start UAC
   bestätigst.
+- **Das Datenverzeichnis ist ohne Erhöhung beschreibbar.** Die Instanz läuft erhöht,
+  liest ihre Konfiguration aber aus einem Ordner, den jeder Prozess unter deinem Konto
+  verändern darf. In `claude_desktop_config.json` stehen MCP-Server als Befehle, die
+  Claude als Kindprozesse startet. Schadcode, der bereits als du läuft, könnte dort einen
+  Eintrag ablegen, der beim nächsten Start mit Administratorrechten ausgeführt wird. Das
+  folgt aus dem Prinzip „erhöhte App, nutzerbeschreibbare Daten" und ist nicht spezifisch
+  für dieses Tool. Es öffnet keinen Weg hinein, macht aber aus einem bestehenden Zugriff
+  volle Administratorrechte. Behandle dein Windows-Konto deshalb so sorgfältig wie ein
+  Administratorkonto, denn mit diesen Instanzen ist es faktisch eines.
 - **Speicher.** Jede Instanz baut ihre eigene Cowork-Umgebung auf. Rechne mit mehreren GB —
   eine voll eingerichtete Instanz mit Cowork kann ~10 GB erreichen.
 - **Langsamer Erststart**, während das leere Datenverzeichnis gefüllt wird.
