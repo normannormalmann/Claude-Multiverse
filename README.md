@@ -44,6 +44,12 @@ To keep that from meaning a UAC prompt on every launch, `register` creates a Tas
 Scheduler task that runs with highest privileges. Shortcuts then just trigger the task.
 Windows doesn't re-prompt for your own scheduled tasks, so launches are silent.
 
+The task is self-contained: its action is the launch command itself (load the Appx
+module from System32, resolve the package, call `Invoke-CommandInDesktopPackage`). It
+does not execute this script or any other file, so nothing a non-elevated process could
+edit later runs with elevated rights behind your back. `stop`, `remove` and `register`
+do run the script elevated, but only after you confirm a UAC prompt.
+
 Classic (non-MSIX) installs are detected and launched directly — no task, no prompt.
 
 ## Commands
@@ -141,6 +147,10 @@ bounce failed. Run it explicitly:
 - **Elevated token.** MSIX instances run from an elevated context. Cowork should be tested
   in a fresh instance before you depend on it. Closing such an instance needs elevation
   too, so `stop` and `remove` show one UAC prompt.
+- **A silently elevating task is a trust decision.** The task carries its complete launch
+  command and touches no editable file, but it still means "start Claude with this data
+  directory" runs as administrator whenever the shortcut is clicked. `cmv unregister
+  <name>` removes the task if you would rather confirm UAC on every launch.
 - **Disk.** Each instance builds its own Cowork environment. Budget several GB — a fully
   set-up instance with Cowork can reach ~10 GB.
 - **Slow first launch** while the empty data directory is populated.

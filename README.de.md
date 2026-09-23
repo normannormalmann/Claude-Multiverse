@@ -46,6 +46,13 @@ Aufgabenplanung-Aufgabe mit höchsten Privilegien an. Verknüpfungen stoßen dan
 die Aufgabe an. Für eigene geplante Aufgaben fragt Windows nicht erneut nach, also
 starten die Instanzen ohne Dialog.
 
+Die Aufgabe ist selbsttragend: Ihre Aktion ist der Startbefehl selbst (Appx-Modul aus
+System32 laden, Paket auflösen, `Invoke-CommandInDesktopPackage` aufrufen). Sie führt
+weder dieses Skript noch eine andere Datei aus. Nichts, was ein nicht-erhöhter Prozess
+später verändern könnte, läuft dadurch unbemerkt mit Administratorrechten. `stop`,
+`remove` und `register` führen das Skript zwar erhöht aus, aber erst nach deiner
+Bestätigung im UAC-Dialog.
+
 Klassische (Nicht-MSIX-)Installationen werden erkannt und direkt gestartet — ohne
 Aufgabe, ohne Abfrage.
 
@@ -146,6 +153,11 @@ automatische Wechsel ist fehlgeschlagen. Explizit ausführen:
 - **Erhöhtes Token.** MSIX-Instanzen laufen aus einem erhöhten Kontext. Cowork in einer
   frischen Instanz testen, bevor du dich darauf verlässt. Auch das Beenden braucht
   Erhöhung, deshalb zeigen `stop` und `remove` einen UAC-Dialog.
+- **Eine still erhöhende Aufgabe ist eine Vertrauensentscheidung.** Die Aufgabe enthält
+  ihren kompletten Startbefehl und berührt keine veränderbare Datei, trotzdem läuft
+  „Claude mit diesem Datenverzeichnis starten" bei jedem Klick als Administrator.
+  `cmv unregister <name>` entfernt die Aufgabe, wenn du lieber bei jedem Start UAC
+  bestätigst.
 - **Speicher.** Jede Instanz baut ihre eigene Cowork-Umgebung auf. Rechne mit mehreren GB —
   eine voll eingerichtete Instanz mit Cowork kann ~10 GB erreichen.
 - **Langsamer Erststart**, während das leere Datenverzeichnis gefüllt wird.

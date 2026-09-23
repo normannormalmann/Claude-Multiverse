@@ -82,11 +82,16 @@ function Get-SelfArgs {
     if ($InstanceName) { $inst = $InstanceName }
 
     $list = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", $cmd)
-    if ($inst)   { $list += "`"$inst`"" }
-    if ($Target) { $list += "`"$Target`"" }
+    $named = @{ Instance = $inst; Target = $Target }
     foreach ($k in 'Label', 'Icon', 'Letter', 'Color') {
-        $v = Get-Variable -Name $k -ValueOnly -ErrorAction SilentlyContinue
-        if ($v) { $list += "-$k"; $list += "`"$v`"" }
+        $named[$k] = Get-Variable -Name $k -ValueOnly -ErrorAction SilentlyContinue
+    }
+    foreach ($k in 'Instance', 'Target', 'Label', 'Icon', 'Letter', 'Color') {
+        $v = $named[$k]
+        if (-not $v) { continue }
+        # Values are re-quoted for a child command line; a literal quote would break out of it.
+        if ($v -match '"') { throw "Value for -$k must not contain a double quote." }
+        $list += "-$k"; $list += "`"$v`""
     }
     if ($StartMenu)             { $list += '-StartMenu' }
     if ($Force -or $AddForce)   { $list += '-Force' }
@@ -167,10 +172,21 @@ function Get-Instances {
     return @(Get-ChildItem -Path $Script:InstancesBase -Directory | Select-Object -ExpandProperty Name)
 }
 
+function Get-ClaudePackage {
+    <# The Claude Desktop MSIX package: exact name first, then any Claude* app package
+       that actually ships Claude.exe (skips frameworks and broken registrations). #>
+    $all = @(Get-AppxPackage -Name 'Claude*' -ErrorAction SilentlyContinue | Where-Object { -not $_.IsFramework })
+    $exact = @($all | Where-Object { $_.Name -eq 'Claude' })
+    if ($exact.Count) { $all = $exact }
+    $withExe = @($all | Where-Object { Test-Path (Join-Path $_.InstallLocation 'app\Claude.exe') })
+    if ($withExe.Count) { return $withExe[0] }
+    if ($all.Count) { return $all[0] }
+    return $null
+}
+
 function Get-ClaudeInstall {
     <# Locate Claude Desktop and describe how it must be launched. #>
-    $pkg = Get-AppxPackage -Name 'Claude' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $pkg) { $pkg = Get-AppxPackage -Name 'Claude*' -ErrorAction SilentlyContinue | Select-Object -First 1 }
+    $pkg = Get-ClaudePackage
     if ($pkg) {
         $exe = Join-Path $pkg.InstallLocation 'app\Claude.exe'
         if (-not (Test-Path $exe)) {
@@ -193,7 +209,10 @@ function Get-ClaudeInstall {
     $root = Join-Path $env:LOCALAPPDATA 'AnthropicClaude'
     if (Test-Path $root) {
         $app = Get-ChildItem -Path $root -Directory -Filter 'app-*' -ErrorAction SilentlyContinue |
-               Sort-Object Name -Descending | Select-Object -First 1
+               Sort-Object -Descending -Property @{ Expression = {
+                   $v = $null
+                   if ([version]::TryParse(($_.Name -replace '^app-', ''), [ref]$v)) { $v } else { [version]'0.0' }
+               } }, Name | Select-Object -First 1
         if ($app -and (Test-Path (Join-Path $app.FullName 'claude.exe'))) {
             return [pscustomobject]@{
                 Type = 'Classic'; Exe = (Join-Path $app.FullName 'claude.exe'); Version = $app.Name
@@ -218,19 +237,24 @@ function Get-RequiredInstall {
     return $install
 }
 
+function Get-StartMenuFolder { Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Claude Multiverse' }
+
 function Get-Shortcuts {
+    <# Shortcuts this tool created: only in the two folders it writes to, and only when
+       the target is one of our three launch modes - so a third-party shortcut can never
+       be mistaken for (and deleted as) an instance shortcut. #>
     $ws = New-Object -ComObject WScript.Shell
-    $roots = @([Environment]::GetFolderPath('Desktop'),
-               (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))
+    $roots = @([Environment]::GetFolderPath('Desktop'), (Get-StartMenuFolder))
     foreach ($root in $roots) {
         if (-not (Test-Path $root)) { continue }
-        Get-ChildItem -Path $root -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        Get-ChildItem -Path $root -Filter '*.lnk' -ErrorAction SilentlyContinue | ForEach-Object {
             $lnk = $ws.CreateShortcut($_.FullName)
             $a = $lnk.Arguments
+            $t = $lnk.TargetPath
             $name = $null
-            if     ($a -match [regex]::Escape($Script:TaskPrefix) + '([^"\s]+)') { $name = $Matches[1] }
-            elseif ($a -match 'launch\s+"?([^"\s]+)"?')                          { $name = $Matches[1] }
-            elseif ($a -match '\.claude-instances[\\/]([^"\s\\/]+)')             { $name = $Matches[1] }
+            if     ($t -like '*\schtasks.exe' -and $a -match [regex]::Escape($Script:TaskPrefix) + '([^"\s]+)') { $name = $Matches[1] }
+            elseif ($t -eq $Script:Ps51 -and $a -match 'claude-multiverse\.ps1"\s+launch\s+"?([^"\s]+)"?')      { $name = $Matches[1] }
+            elseif ($t -like '*\claude.exe' -and $a -match '\.claude-instances[\\/]([^"\s\\/]+)')                 { $name = $Matches[1] }
             if ($name) { [pscustomobject]@{ Path = $_.FullName; Instance = $name } }
         }
     }
@@ -358,7 +382,8 @@ function Invoke-Launch {
         }
         else {
             if (-not (Test-Admin)) {
-                Start-Process -FilePath $Script:Ps51 -ArgumentList (Get-SelfArgs -OverrideCommand 'launch' -InstanceName $Name -AddNoTask) -Verb RunAs
+                $argList = @('-WindowStyle', 'Hidden') + (Get-SelfArgs -OverrideCommand 'launch' -InstanceName $Name -AddNoTask)
+                Start-Process -FilePath $Script:Ps51 -ArgumentList $argList -Verb RunAs
                 Write-Ok "Launching '$Name' elevated (UAC prompt)."
                 return
             }
@@ -390,18 +415,51 @@ function Invoke-Register {
         return
     }
 
-    New-Item -ItemType Directory -Force -Path (Get-InstanceDir $Name) | Out-Null
+    $dir = Get-InstanceDir $Name
+    if (-not (Test-Path $dir)) { throw "Instance '$Name' does not exist. Create it with: new $Name" }
 
-    $taskName = Get-TaskName $Name
-    $action   = New-ScheduledTaskAction -Execute $Script:Ps51 `
-                -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$PSCommandPath`" launch `"$Name`" -NoTask"
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-                -MultipleInstances Parallel -Compatibility Win8
+    $taskName  = Get-TaskName $Name
+    $action    = New-ScheduledTaskAction -Execute $Script:Ps51 -Argument (Get-TaskLaunchArgument -Dir $dir -PackageFamilyName $install.PackageFamilyName)
+    $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                 -MultipleInstances Parallel -Compatibility Win8
     $settings.ExecutionTimeLimit = 'PT0S'   # never kill the launched app
-    $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Highest
+    $principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+                 -LogonType Interactive -RunLevel Highest
 
-    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -Principal $principal -Force | Out-Null
+    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -Principal $principal -Force `
+        -Description "Claude Multiverse: starts the Claude Desktop instance '$Name' with its own data directory. Self-contained - runs no script file." | Out-Null
     Write-Ok "Scheduled task '$taskName' registered - launches without UAC from now on."
+}
+
+function ConvertTo-PsLiteral {
+    <# Single-quoted PowerShell string literal. #>
+    param([string]$s)
+    return "'" + ($s -replace "'", "''") + "'"
+}
+
+function Get-TaskLaunchArgument {
+    <# The powershell.exe argument string for the scheduled task. The task runs elevated
+       without a UAC prompt, so it must not depend on anything a non-elevated process could
+       tamper with: no script file, no profile, the Appx module loaded by absolute path
+       from System32. The package is resolved at run time because its install folder
+       changes with every Claude update. Only single quotes are used so the string
+       survives the powershell.exe command line intact. #>
+    param([string]$Dir, [string]$PackageFamilyName)
+    $appx  = ConvertTo-PsLiteral (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules\Appx\Appx.psd1')
+    $pfn   = ConvertTo-PsLiteral $PackageFamilyName
+    $udd   = ConvertTo-PsLiteral $Dir
+    $code  = 'try { '
+    $code += "Import-Module $appx -ErrorAction Stop; "
+    $code += "`$p = Get-AppxPackage | Where-Object { `$_.PackageFamilyName -eq $pfn } | Select-Object -First 1; "
+    $code += "if (-not `$p) { throw ('Claude Desktop package not found: ' + $pfn) }; "
+    $code += "`$e = Join-Path `$p.InstallLocation 'app\Claude.exe'; "
+    $code += "if (-not (Test-Path `$e)) { `$e = (Get-ChildItem `$p.InstallLocation -Filter 'Claude.exe' -Recurse | Select-Object -First 1).FullName }; "
+    $code += "Invoke-CommandInDesktopPackage -PackageFamilyName `$p.PackageFamilyName -AppId 'Claude' -Command `$e -Args ('--user-data-dir=' + [char]34 + $udd + [char]34) "
+    $code += '} catch { '
+    $code += 'Add-Type -AssemblyName System.Windows.Forms; '
+    $code += "[void][System.Windows.Forms.MessageBox]::Show(`$_.Exception.Message, 'Claude Multiverse', 0, 16); exit 1 "
+    $code += '}'
+    return "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -Command $code"
 }
 
 function Invoke-Unregister {
@@ -424,12 +482,15 @@ function Invoke-Shortcut {
     $install = Get-RequiredInstall
 
     if (-not $DisplayLabel) { $DisplayLabel = Get-DefaultLabel $Name }
+    if ($DisplayLabel.IndexOfAny([System.IO.Path]::GetInvalidFileNameChars()) -ge 0 -or $DisplayLabel -match '^\.+$') {
+        throw "Label '$DisplayLabel' contains characters that are not allowed in a file name."
+    }
     $dir = Get-InstanceDir $Name
-    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    if (-not (Test-Path $dir)) { throw "Instance '$Name' does not exist. Create it with: new $Name" }
 
     $folder = [Environment]::GetFolderPath('Desktop')
     if ($StartMenu) {
-        $folder = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Claude Multiverse'
+        $folder = Get-StartMenuFolder
         New-Item -ItemType Directory -Force -Path $folder | Out-Null
     }
     $lnkPath = Join-Path $folder "$DisplayLabel.lnk"
@@ -531,6 +592,12 @@ function Invoke-New {
 
     Invoke-Shortcut -Name $Name -DisplayLabel $Label -IconPath $iconPath -Overwrite
 
+    if ($install.Type -eq 'MSIX' -and -not (Test-AdminCapable)) {
+        Write-Host ''
+        Write-Warn2 'This account cannot elevate. The shortcut will ask for administrator credentials on'
+        Write-Warn2 'every launch, and running instances as a different (admin) user is untested.'
+    }
+
     Write-Host ''
     $go = Read-Answer '  Launch it now? [Y/n]'
     if ($go -eq '' -or $go -match '^[yYjJ]') { Invoke-Launch -Name $Name }
@@ -575,7 +642,14 @@ function Remove-InstanceArtifacts {
     $ico = Join-Path $Script:IconsBase "$Name.ico"
     if (Test-Path $ico) { Remove-Item $ico -Force -ErrorAction SilentlyContinue }
 
-    Remove-Item -Path (Get-InstanceDir $Name) -Recurse -Force
+    # Never follow a junction or symlink: a redirected instance folder must not turn
+    # "delete this instance" into "delete whatever it points at".
+    $dir  = Get-InstanceDir $Name
+    $item = Get-Item -Path $dir -Force
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        throw "$dir is a junction or symlink - refusing to delete through it. Remove the link yourself."
+    }
+    Remove-Item -Path $dir -Recurse -Force
     Write-Ok "Instance '$Name' removed."
 }
 
@@ -622,6 +696,8 @@ function Invoke-CloneConfig {
 
     $install = Get-RequiredInstall
     if (-not $To -or -not $From) { throw 'Usage: clone-config <from> <to>   (use "default" for the built-in instance)' }
+    if ($From -ne 'default') { Assert-InstanceName $From }
+    if ($To   -ne 'default') { Assert-InstanceName $To }
 
     $srcDir = if ($From -eq 'default') { $install.ConfigDir } else { Get-InstanceDir $From }
     $dstDir = if ($To   -eq 'default') { $install.ConfigDir } else { Get-InstanceDir $To }
