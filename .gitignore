@@ -1,0 +1,20 @@
+# Generated icons (users create them locally)
+*.ico
+
+# Screenshots for the README live in docs/ and are tracked
+*.png
+!docs/**
+
+# Local experiments
+local/
+scratch/
+
+# Windows
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Editors
+.vscode/
+.idea/
+*.swp
