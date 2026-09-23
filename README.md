@@ -189,6 +189,10 @@ Not affiliated with or endorsed by Anthropic. Claude and Claude Desktop are Anth
 products. This script passes a documented Electron flag to an app you already have
 installed — unsupported usage that may need adjusting when Claude Desktop changes.
 
+Use at your own risk. The instances run with administrator rights, and the trade-offs
+this involves are described under [Known limitations](#known-limitations). Read them
+before you rely on this tool, especially on a machine you share or use for work.
+
 ## Licence
 
 MIT

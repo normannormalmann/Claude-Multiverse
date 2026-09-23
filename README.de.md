@@ -198,6 +198,11 @@ sind Produkte von Anthropic. Das Skript übergibt einen dokumentierten Electron-
 eine bereits installierte App — nicht unterstützte Nutzung, die bei Änderungen an Claude
 Desktop angepasst werden muss.
 
+Nutzung auf eigene Gefahr. Die Instanzen laufen mit Administratorrechten; die damit
+verbundenen Abwägungen stehen unter [Bekannte Einschränkungen](#bekannte-einschränkungen).
+Lies sie, bevor du dich auf das Tool verlässt, besonders auf einem geteilten oder
+beruflich genutzten Rechner.
+
 ## Lizenz
 
 MIT
